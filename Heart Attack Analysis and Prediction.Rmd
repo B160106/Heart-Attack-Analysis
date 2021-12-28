@@ -1,0 +1,368 @@
+---
+title: "Heart Attack Analysis & Prediction"
+author: "Benjamin Barnett & Krishna Piratla"
+date: "5/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(MASS)
+library(ROCR)
+library(class)
+library(gam)
+library(randomForest)
+library(tidyverse)
+library(ggpubr)
+```
+
+
+After reading and cleaning the data, we examine plots for each feature.
+
+```{r, echo=FALSE}
+heart <- rheart <- read.csv("C:/Users/Barnett/Downloads/heart.csv")
+colnames(heart)[10] <- "old.peak"
+
+index_remove <- NULL
+for(i in seq(nrow(heart))){
+if(heart$thall[i] == 0 | heart$caa[i] == 4){
+	index_remove <- c(index_remove, i)
+	}
+if(heart$restecg[i] == 2){
+	heart$restecg[i] <- 1
+	}
+}
+
+heart <- heart[-index_remove,]
+
+heart$sex <- factor(heart$sex)
+levels(heart$sex) <- c("_female", "_male")
+
+heart$cp <- factor(heart$cp)
+levels(heart$cp) <- c("_typical","_atypical","_non-anginal","_asymptomatic")
+
+heart$fbs <- factor(heart$fbs)
+
+heart$restecg <- factor(heart$restecg)
+levels(heart$restecg) <- c("_normal","_stt")
+
+heart$exng <- factor(heart$exng)
+
+heart$slp <- factor(heart$slp)
+levels(heart$slp) <- c("_up","_flat","_down")
+
+heart$thall <- factor(heart$thall)
+levels(heart$thall) <- c("_normal","_fixed","_reversable")
+
+heart$output <- factor(heart$output)
+```
+
+
+```{r, echo=FALSE}
+ggplot(heart, aes(age, fill=output)) + geom_histogram(binwidth=2) + labs(fill="Disease", x="Age", y="Number of Patients") + scale_fill_manual(values=c("#11D164","#F8766D"))
+```
+
+
+```{r, echo=FALSE}
+a <- ggplot(heart, aes(trtbps, fill=output)) + geom_histogram(binwidth=5) + labs(fill="Disease", x="Resting Blood Pressure", y="Number of Patients") + scale_fill_manual(values=c("#11D164","#F8766D"))
+b <- ggplot(heart, aes(chol, fill=output)) + geom_histogram(binwidth=20) + labs(fill="Disease", x="Serum Cholesterol in mg/dl", y="Number of Patients") + scale_fill_manual(values=c("#11D164","#F8766D"))
+c <- ggplot(heart, aes(thalachh, fill=output)) + geom_histogram(binwidth=5) + labs(fill="Disease", x="Maximum Heart Rate Achieved", y="Number of Patients") + scale_fill_manual(values=c("#11D164","#F8766D"))
+d <- ggplot(heart, aes(old.peak, fill=output)) + geom_histogram(binwidth=.5) + labs(fill="Disease", x="ST Depression Induced by Exercise", y="Number of Patients") + scale_fill_manual(values=c("#11D164","#F8766D"))
+
+ggarrange(a, b, c, d, ncol=2, nrow=2)
+```
+
+
+```{r, echo=FALSE}
+e <- ggplot(heart, aes(sex, fill=output)) + geom_bar() + labs(fill="Disease", x="Sex", y="Number of Patients") + scale_x_discrete(labels=c("Female","Male")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+f <- ggplot(heart, aes(cp, fill=output)) + geom_bar() + labs(fill="Disease", x="Chest Pain", y="Number of Patients") + scale_x_discrete(labels=c("Typ", "Atyp", "Non-Ang", "Asymp")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+g <- ggplot(heart, aes(fbs, fill=output)) + geom_bar() + labs(fill="Disease", x="Fasting Blood Sugar > 120 mg/dl", y="Number of Patients") + scale_x_discrete(labels=c("False","True")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+h <- ggplot(heart, aes(restecg, fill=output)) + geom_bar() + labs(fill="Disease", x="Electrocardiogram Results", y="Number of Patients") + scale_x_discrete(labels=c("Normal", "ST-T")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+
+ggarrange(e,f,g,h, ncol=2, nrow=2)
+```
+
+
+```{r, echo=FALSE}
+i <- ggplot(heart, aes(exng, fill=output)) + geom_bar() + labs(fill="Disease", x="Exercise Induced Angina", y="Number of Patients") + scale_x_discrete(labels=c("No", "Yes")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+j <- ggplot(heart, aes(slp, fill=output)) + geom_bar() + labs(fill="Disease", x="Peak Exercise ST Segment Slope",y="Number of Patients") + scale_x_discrete(labels=c("Upsloping","Flat","Downsloping")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+k <- ggplot(heart, aes(caa, fill=output)) + geom_bar() + labs(fill="Disease", x="Number of Major Vessels", y="Number of Patients") + scale_fill_manual(values=c("#11D164","#F8766D"))
+l <- ggplot(heart, aes(thall, fill=output)) + geom_bar() + labs(fill="Disease", x="Thallium Stress Results", y="Number of Patients") + scale_x_discrete(labels=c("Normal", "Fixed", "Reversible")) + scale_fill_manual(values=c("#11D164","#F8766D"))
+
+ggarrange(i,j,k,l, ncol=2, nrow=2)
+```
+
+
+The response (Coronary Artery Narrowing > 50%) is balanced, as 160 patients have heart disease and 136 patients do not have heart disease.
+
+```{r, echo=FALSE}
+table(heart$output)
+```
+
+
+Fitting logistic model with 50% training data.
+
+```{r, echo=FALSE}
+set.seed(1)
+train <- sample(1:nrow(heart), 0.5*nrow(heart))
+output.test <- heart[-train,]$output
+
+glm.fit <- glm(output ~., heart[train,], family=binomial)
+glm.prb <- predict(glm.fit, heart[-train,], type="response")
+	
+roc.prd <- prediction(glm.prb, output.test)
+roc.prf <- performance(roc.prd,"tpr","fpr")
+
+plot(roc.prf, colorize=TRUE)
+cat("AUC:", as.numeric((performance(roc.prd,"auc"))@y.values), "\n")
+```
+
+
+```{r}
+glm.prd <- rep("0", 148); glm.prd[glm.prb > .2] <- "1"
+table(glm.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(glm.prd, output.test)[1] + table(glm.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+glm.prd <- rep("0", 148); glm.prd[glm.prb > .5] <- "1"
+table(glm.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(glm.prd, output.test)[1] + table(glm.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+glm.prd <- rep("0", 148); glm.prd[glm.prb > .8] <- "1"
+table(glm.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(glm.prd, output.test)[1] + table(glm.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+summary(glm.fit)
+```
+
+
+Fitting LDA model with 50% training data.
+
+```{r, echo=FALSE}
+set.seed(1)
+train <- sample(1:nrow(heart), 0.5*nrow(heart))
+output.test <- heart[-train,]$output
+
+lda.fit <- lda(output ~., heart[train,])
+lda.prb <- predict(lda.fit, heart[-train,], type="response")
+	
+roc.prd <- prediction(lda.prb$posterior[,2], output.test)
+roc.prf <- performance(roc.prd,"tpr","fpr")
+
+plot(roc.prf, colorize=TRUE)
+cat("AUC:", as.numeric((performance(roc.prd,"auc"))@y.values), "\n")
+```
+
+
+```{r}
+lda.prd <- rep("0", 148); lda.prd[lda.prb$posterior[,2] > .2] <- "1"
+table(lda.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(lda.prd, output.test)[1] + table(lda.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+lda.prd <- rep("0", 148); lda.prd[lda.prb$posterior[,2] > .5] <- "1"
+table(lda.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(lda.prd, output.test)[1] + table(lda.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+lda.prd <- rep("0", 148); lda.prd[lda.prb$posterior[,2] > .8] <- "1"
+table(lda.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(lda.prd, output.test)[1] + table(lda.prd, output.test)[4])/148, "\n")
+```
+
+
+Fitting QDA model with 50% training data.
+
+```{r, echo=FALSE}
+set.seed(1)
+train <- sample(1:nrow(heart), 0.5*nrow(heart))
+output.test <- heart[-train,]$output
+
+qda.fit <- qda(output ~., heart[train,])
+qda.prb <- predict(qda.fit, heart[-train,], type="response")
+	
+roc.prd <- prediction(qda.prb$posterior[,2], output.test)
+roc.prf <- performance(roc.prd,"tpr","fpr")
+
+plot(roc.prf, colorize=TRUE)
+cat("AUC:", as.numeric((performance(roc.prd,"auc"))@y.values), "\n")
+```
+
+
+```{r}
+qda.prd <- rep("0", 148); qda.prd[qda.prb$posterior[,2] > .2] <- "1"
+table(qda.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(qda.prd, output.test)[1] + table(qda.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+qda.prd <- rep("0", 148); qda.prd[qda.prb$posterior[,2] > .5] <- "1"
+table(qda.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(qda.prd, output.test)[1] + table(qda.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+qda.prd <- rep("0", 148); qda.prd[qda.prb$posterior[,2] > .8] <- "1"
+table(qda.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(qda.prd, output.test)[1] + table(qda.prd, output.test)[4])/148, "\n")
+```
+
+
+Fitting logistic GAM model on 50% training data.
+
+```{r, echo=FALSE}
+set.seed(1)
+train <- sample(1:nrow(heart), 0.5*nrow(heart))
+output.test <- heart[-train,]$output
+
+gam.fit <- gam(output ~., data=heart[train,], family=binomial)
+gam.prb <- predict(gam.fit, heart[-train,], type="response")
+
+roc.prd <- prediction(gam.prb, output.test)
+roc.prf <- performance(roc.prd,"tpr","fpr")
+
+plot(roc.prf, colorize=TRUE)
+cat("AUC:", as.numeric((performance(roc.prd,"auc"))@y.values), "\n")
+```
+
+
+```{r}
+gam.prd <- rep("0", 148); gam.prd[gam.prb > .2] <- "1"
+table(gam.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(gam.prd, output.test)[1] + table(gam.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+gam.prd <- rep("0", 148); gam.prd[gam.prb > .5] <- "1"
+table(gam.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(gam.prd, output.test)[1] + table(gam.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+gam.prd <- rep("0", 148); gam.prd[gam.prb > .8] <- "1"
+table(gam.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(gam.prd, output.test)[1] + table(gam.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+summary(gam.fit)
+```
+
+
+Fitting random forest with 50% training data.
+
+```{r, echo=FALSE}
+set.seed(1)
+train <- sample(1:nrow(heart), 0.5*nrow(heart))
+output.test <- heart[-train,]$output
+
+rnf.fit <- randomForest(output ~., data=heart[train,])
+rnf.prb <- predict(rnf.fit, heart[-train,], type="prob")
+
+roc.prd <- prediction(rnf.prb[,2], output.test)
+roc.prf <- performance(roc.prd,"tpr","fpr")
+
+plot(roc.prf, colorize=TRUE)
+cat("AUC:", as.numeric((performance(roc.prd,"auc"))@y.values), "\n")
+```
+
+
+```{r}
+rnf.prd <- rep("0", 148); rnf.prd[rnf.prb[,2] > .2] <- "1"
+table(rnf.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(rnf.prd, output.test)[1] + table(rnf.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+rnf.prd <- rep("0", 148); rnf.prd[rnf.prb[,2] > .5] <- "1"
+table(rnf.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(rnf.prd, output.test)[1] + table(rnf.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+rnf.prd <- rep("0", 148); rnf.prd[rnf.prb[,2] > .8] <- "1"
+table(rnf.prd, output.test)
+```
+
+
+```{r, echo=FALSE}
+cat("Classification Accuracy:", (table(rnf.prd, output.test)[1] + table(rnf.prd, output.test)[4])/148, "\n")
+```
+
+
+```{r}
+varImpPlot(rnf.fit, main="")
